@@ -1,0 +1,76 @@
+From ded8d6105317394b8a011c85a0739b9ec13a090a Mon Sep 17 00:00:00 2001
+From: Slava Makkaveev
+Date: Wed, 12 Jul 2017 10:48:03 +0300
+Subject: [PATCH] Android packer unpacking patch
+
+---
+ runtime/dex_file.cc | 39 +++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 39 insertions(+)
+
+diff --git a/runtime/dex_file.cc b/runtime/dex_file.cc
+index 25d5ef4..0a00a76 100644
+--- a/runtime/dex_file.cc
++++ b/runtime/dex_file.cc
+@@ -26,6 +26,7 @@
+ 
+ #include <memory>
+ #include <sstream>
++#include <fstream>
+ 
+ #include "art_field-inl.h"
+ #include "art_method-inl.h"
+@@ -63,6 +64,31 @@ static int OpenAndReadMagic(const char* filename, uint32_t* magic, std::string*
+     *error_msg = StringPrintf("Unable to open '%s' : %s", filename, strerror(errno));
+     return -1;
+   }
++
++  //------------------------------------------------------------------
++  // DEX file unpacking
++  //------------------------------------------------------------------  
++  
++  struct stat st;
++  // let's limit processing file list
++  if (strstr(filename, "/data/data") != NULL) {
++    char* fn_out = new char[PATH_MAX];
++    strcpy(fn_out, filename);
++    strcat(fn_out, "__unpacked_dex");
++    
++    int fd_out = open(fn_out, O_WRONLY | O_CREAT | O_EXCL, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
++
++    if (!fstat(fd.get(), &st)) {
++      char* addr = (char*)mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd.get(), 0);
++      write(fd_out, addr, st.st_size);
++      munmap(addr, st.st_size);
++    }   
++
++    close(fd_out);
++    delete fn_out;
++  }
++  //------------------------------------------------------------------
++
+   int n = TEMP_FAILURE_RETRY(read(fd.get(), magic, sizeof(*magic)));
+   if (n != sizeof(*magic)) {
+     *error_msg = StringPrintf("Failed to find magic in '%s'", filename);
+@@ -412,6 +438,19 @@ DexFile::DexFile(const uint8_t* base, size_t size,
+       find_class_def_misses_(0),
+       class_def_index_(nullptr),
+       oat_dex_file_(oat_dex_file) {
++
++  //------------------------------------------------------------------
++  // DEX file unpacking
++  //------------------------------------------------------------------
++
++  // let's limit processing file list
++  if (location.find("/data/data/") != std::string::npos) {
++    std::ofstream dst(location + "__unpacked_oat", std::ios::binary);
++    dst.write(reinterpret_cast<const char*>(base), size);
++    dst.close();
++  }
++  //------------------------------------------------------------------
++
+   CHECK(begin_ != nullptr) << GetLocation();
+   CHECK_GT(size_, 0U) << GetLocation();
+ }
+-- 
+2.7.4
+
